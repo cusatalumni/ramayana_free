@@ -36,15 +36,17 @@ const IntroScreen: React.FC<IntroScreenProps> = ({ onModeSelect }) => {
             <p className="mt-2 text-stone-600 flex-grow">
               A seamless, ad-free experience. Subscribe via PayPal for unlimited access using our premium API key.
             </p>
+          < div className="bg-gradient-to-br from-amber-50 to-orange-100 min-h-screen flex items-center justify-center p-4"> 
+<h4>Subscription Details:</h4>
+<p className="mt-2 text-stone-600 flex-grow">Free for 10 days
+Then ‪1.00 USD‬ for one month
+Then ‪5.00 USD‬ for each month
+(Renews until you cancel)</p>
+          </div>
             <div className="mt-6">
                 <PayPalButton />
             </div>
-          < Div> Subscription Details:
-Free for 10 days
-Then ‪1.00 USD‬ for one month
-Then ‪5.00 USD‬ for each month
-(Renews until you cancel)
-          </div>
+
            </div>
 
           {/* Free Version */}
