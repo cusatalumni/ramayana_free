@@ -1,32 +1,69 @@
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 
+// This component integrates the PayPal Smart Subscription Button.
+// It dynamically loads the PayPal SDK and renders the button.
 const PayPalButton: React.FC = () => {
-    // IMPORTANT: Replace the placeholder values below with your actual PayPal information.
-    // 1. In the `value` for the hidden input named "hosted_button_id", 
-    //    replace YOUR_PAYPAL_HOSTED_BUTTON_ID with the ID from your PayPal account.
-    // 2. In the `value` for the hidden input named "return",
-    //    replace YOUR_APP_RETURN_URL with the full URL of your deployed application.
-    //    Example: "https://ramayana-daily-post.vercel.app/?subscription=success"
-    const returnUrl = "YOUR_APP_RETURN_URL/?subscription=success";
-    const buttonId = "YOUR_PAYPAL_HOSTED_BUTTON_ID";
+  // A ref to the container div allows PayPal's script to find where to render the button.
+  const paypalButtonContainerRef = useRef<HTMLDivElement | null>(null);
 
-    return (
-        <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
-            <input type="hidden" name="cmd" value="_s-xclick" />
-            <input type="hidden" name="hosted_button_id" value={buttonId} />
-            <input type="hidden" name="return" value={returnUrl} />
-            <input type="hidden" name="cancel_return" value="YOUR_APP_RETURN_URL" />
-            <button
-                type="submit"
-                className="w-full font-cinzel text-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold py-3 px-8 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:scale-105"
-            >
-                Subscribe with PayPal
-            </button>
-            <img alt="" src="https://www.paypal.com/en_US/i/scr/pixel.gif" width="1" height="1" />
-        </form>
-    );
+  useEffect(() => {
+    // Prevent the script from re-injecting and the button from re-rendering if it already exists.
+    if (paypalButtonContainerRef.current && paypalButtonContainerRef.current.childElementCount > 0) {
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = "https://www.paypal.com/sdk/js?client-id=AZs7t5CLK8rb_RKtj1X5w6ZQU9XYDT0fGQOvKTm5e2jIrHGI5j5V9QaSix7YPxF6Eg0qM89UIca95kQ0&vault=true&intent=subscription";
+    script.setAttribute('data-sdk-integration-source', 'button-factory');
+    script.async = true;
+
+    // This function runs only after the PayPal SDK script has fully loaded.
+    script.onload = () => {
+      // The `window.paypal` object is now available.
+      if (window.paypal && paypalButtonContainerRef.current) {
+        window.paypal.Buttons({
+          style: {
+            shape: 'rect',
+            color: 'gold',
+            layout: 'vertical',
+            label: 'subscribe'
+          },
+          createSubscription: function(data: any, actions: any) {
+            return actions.subscription.create({
+              /* Creates the subscription */
+              plan_id: 'P-6JF18348X6643263VNB3YRTY'
+            });
+          },
+          onApprove: function(data: any, actions: any) {
+            // Subscription approved. Redirect user to the app to confirm.
+            // The App.tsx component will detect "?subscription=success" in the URL
+            // and activate the managed mode.
+            const returnUrl = `${window.location.origin}${window.location.pathname}?subscription=success`;
+            window.location.href = returnUrl;
+          },
+          onError: function(err: any) {
+            console.error("PayPal Button Error:", err);
+            alert("An error occurred with your subscription. Please check the console and try again.");
+          }
+        }).render(paypalButtonContainerRef.current);
+      }
+    };
+
+    document.body.appendChild(script);
+
+  }, []); // The empty dependency array ensures this effect runs only once when the component mounts.
+
+  // The div that the PayPal button will be rendered into.
+  return <div ref={paypalButtonContainerRef} id="paypal-button-container-P-6JF18348X6643263VNB3YRTY"></div>;
 };
 
-export default PayPalButton;
+// We need to declare the `paypal` object on the window type to satisfy TypeScript,
+// as it is loaded from an external script.
+declare global {
+  interface Window {
+    paypal?: any;
+  }
+}
 
+export default PayPalButton;
