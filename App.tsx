@@ -1,142 +1,144 @@
 
-import React, { useState, useCallback } from 'react';
-import { addWatermark } from './services/geminiService';
-import { PostData, DisplayablePost } from './types';
-import Header from './components/Header';
-import QuoteCard from './components/QuoteCard';
-import ActionButtons from './components/ActionButtons';
-import Loader from './components/Loader';
-import { GenerateIcon } from './components/icons';
+import React, { useState, useEffect, useCallback } from 'react';
+import { GoogleGenAI, Type } from "@google/genai";
+import IntroScreen from './components/IntroScreen';
+import Generator from './components/Generator';
+import { PostData } from './types';
+
+type AppMode = 'intro' | 'managed' | 'free';
+
+const slokaAndPromptSchema = {
+    type: Type.OBJECT,
+    properties: {
+        sanskrit_sloka: { type: Type.STRING, description: "An original four-line sloka from the Ramayana in Sanskrit (Devanagari script)." },
+        malayalam_transliteration: { type: Type.STRING, description: "The transliteration of the above Sanskrit sloka in Malayalam script." },
+        malayalam_meaning: { type: Type.STRING, description: "The meaning of the sloka in Malayalam." },
+        english_meaning: { type: Type.STRING, description: "The meaning of the sloka in English." },
+        visual_prompt: { type: Type.STRING, description: "A detailed, vivid, artistic description for an image generator to create a picture that visually represents the sloka's theme, mood, and characters." },
+    },
+    required: ["sanskrit_sloka", "malayalam_transliteration", "malayalam_meaning", "english_meaning", "visual_prompt"],
+};
 
 const App: React.FC = () => {
-  const [post, setPost] = useState<DisplayablePost | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [shouldGenerateImage, setShouldGenerateImage] = useState<boolean>(true);
+    const [mode, setMode] = useState<AppMode>('intro');
+    const [apiKey, setApiKey] = useState<string | null>(null);
 
-  const handleGeneratePost = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    setPost(null);
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('subscription') === 'success') {
+            localStorage.setItem('subscriptionStatus', 'active');
+            localStorage.setItem('appMode', 'managed');
+            setMode('managed');
+            // Clean the URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return;
+        }
 
-    try {
-      // Step 1: Always fetch text and visual prompt
-      const textResponse = await fetch('/api/generate-text', { method: 'POST' });
-      if (!textResponse.ok) {
-        const errorData = await textResponse.json().catch(() => ({ message: 'Failed to generate sloka text.' }));
-        throw new Error(errorData.message || 'Failed to generate sloka text.');
-      }
-      const textData: PostData = await textResponse.json();
-      
-      // Display text immediately, noting if an image was requested
-      setPost({ ...textData, imageUrl: null, imageRequested: shouldGenerateImage });
+        const subscriptionStatus = localStorage.getItem('subscriptionStatus');
+        if (subscriptionStatus === 'active') {
+            setMode('managed');
+            return;
+        }
 
-      if (shouldGenerateImage) {
-        // Step 2: Fetch image only if toggle is on
-        const imageResponse = await fetch('/api/generate-image', {
+        const savedMode = localStorage.getItem('appMode') as AppMode;
+        const savedApiKey = localStorage.getItem('userApiKey');
+        if (savedMode === 'free' && savedApiKey) {
+            setApiKey(savedApiKey);
+            setMode('free');
+        }
+    }, []);
+
+    const handleModeChange = (newMode: AppMode, newApiKey?: string) => {
+        setMode(newMode);
+        localStorage.setItem('appMode', newMode);
+        if (newMode === 'free' && newApiKey) {
+            setApiKey(newApiKey);
+            localStorage.setItem('userApiKey', newApiKey);
+            localStorage.removeItem('subscriptionStatus');
+        } else if (newMode === 'managed') {
+            localStorage.removeItem('userApiKey');
+        }
+    };
+
+    const handleGoToIntro = () => {
+        setMode('intro');
+        localStorage.removeItem('appMode');
+        localStorage.removeItem('userApiKey');
+        localStorage.removeItem('subscriptionStatus');
+    };
+
+    const generateTextServerSide = async (): Promise<PostData> => {
+        const response = await fetch('/api/generate-text', { method: 'POST' });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || 'Failed to generate sloka text from server.');
+        }
+        return response.json();
+    };
+
+    const generateImageServerSide = async (visual_prompt: string): Promise<string> => {
+        const response = await fetch('/api/generate-image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ visual_prompt: textData.visual_prompt })
+            body: JSON.stringify({ visual_prompt }),
         });
-        if (!imageResponse.ok) {
-            const errorData = await imageResponse.json().catch(() => ({ message: 'Failed to generate the image.' }));
-            throw new Error(errorData.message || 'Failed to generate the image.');
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || 'Failed to generate image from server.');
         }
-        const { rawImageUrl } = await imageResponse.json();
+        const { rawImageUrl } = await response.json();
+        return rawImageUrl;
+    };
 
-        // Step 3: Watermark and update state with the final image
-        const watermarkedImageUrl = await addWatermark(rawImageUrl, "www.annapoornainfo.com");
-        setPost(currentPost => currentPost ? { ...currentPost, imageUrl: watermarkedImageUrl } : null);
-      }
-    } catch (err) {
-        console.error(err);
-        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-        setError(`Post generation failed: ${errorMessage}`);
-        setPost(null); // Clear partial post on error
-    } finally {
-        setIsLoading(false);
+    const generateTextClientSide = async (userApiKey: string): Promise<PostData> => {
+        const ai = new GoogleGenAI({ apiKey: userApiKey });
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: "Generate an original four-line sloka from the Ramayana, along with its translations and a creative visual prompt for an image generator.",
+            config: {
+                systemInstruction: "You are an expert on the Ramayana. Your task is to generate a four-line Sanskrit sloka, provide its Malayalam transliteration and meaning, its English meaning, and a creative visual prompt. You must respond strictly in the provided JSON schema format.",
+                responseMimeType: "application/json",
+                responseSchema: slokaAndPromptSchema,
+            },
+        });
+        return JSON.parse(response.text);
+    };
+
+    const generateImageClientSide = async (userApiKey: string, visual_prompt: string): Promise<string> => {
+        const ai = new GoogleGenAI({ apiKey: userApiKey });
+        const imageResponse = await ai.models.generateImages({
+            model: 'imagen-3.0-generate-002',
+            prompt: `Epic, cinematic, high detail photo of: ${visual_prompt}. The style should be reminiscent of classical Indian art, with rich colors and dramatic lighting.`,
+            config: {
+                numberOfImages: 1,
+                outputMimeType: 'image/jpeg',
+                aspectRatio: '1:1',
+            },
+        });
+        const base64ImageBytes = imageResponse.generatedImages?.[0]?.image?.imageBytes;
+        if (!base64ImageBytes) throw new Error("Client-side image generation failed.");
+        return `data:image/jpeg;base64,${base64ImageBytes}`;
+    };
+
+    if (mode === 'intro') {
+        return <IntroScreen onModeSelect={handleModeChange} />;
     }
-  }, [shouldGenerateImage]);
 
-  const getButtonText = () => {
-    if (isLoading) {
-      return shouldGenerateImage ? 'Generating Post...' : 'Generating Sloka...';
-    }
-    return shouldGenerateImage ? 'Generate Daily Post' : 'Generate Sloka (Text Only)';
-  };
+    const generationFunctions = mode === 'managed' 
+        ? { generateText: generateTextServerSide, generateImage: generateImageServerSide }
+        : { 
+            generateText: () => generateTextClientSide(apiKey!), 
+            generateImage: (prompt: string) => generateImageClientSide(apiKey!, prompt) 
+          };
 
-  return (
-    <div className="bg-gradient-to-br from-amber-50 to-orange-100 min-h-screen text-stone-800 flex flex-col items-center p-4 sm:p-6 md:p-8">
-      <div className="w-full max-w-2xl mx-auto">
-        <Header />
-
-        <main className="mt-8">
-          <div className="flex flex-col items-center mb-6">
-              <div className={`flex items-center justify-center space-x-3 text-stone-600 mb-6 bg-amber-100/50 p-3 rounded-full border border-amber-200 transition-opacity ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                <label htmlFor="image-toggle" className={`font-semibold pl-2 ${isLoading ? 'cursor-not-allowed' : 'cursor-pointer'}`}>Generate Post with Image</label>
-                <div className="relative inline-block w-10 align-middle select-none transition duration-200 ease-in">
-                  <input 
-                    type="checkbox" 
-                    name="image-toggle" 
-                    id="image-toggle" 
-                    checked={shouldGenerateImage}
-                    onChange={() => setShouldGenerateImage(!shouldGenerateImage)}
-                    disabled={isLoading}
-                    className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer disabled:cursor-not-allowed"
-                    style={{top: '-0.25rem', left: '-0.25rem'}}
-                  />
-                  <label htmlFor="image-toggle" className={`toggle-label block overflow-hidden h-4 rounded-full bg-stone-300 ${isLoading ? 'cursor-not-allowed' : 'cursor-pointer'}`}></label>
-                </div>
-              </div>
-              <p className="text-xs text-stone-500 -mt-2 mb-6 italic">(Image generation requires a billed Google API account)</p>
-
-            <button
-              onClick={handleGeneratePost}
-              disabled={isLoading}
-              className="font-cinzel text-lg inline-flex items-center gap-3 bg-gradient-to-br from-amber-500 to-orange-600 text-white font-bold py-3 px-8 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-amber-300 disabled:bg-gradient-to-br disabled:from-amber-300 disabled:to-orange-400 disabled:cursor-not-allowed disabled:scale-100"
-            >
-              {isLoading ? <Loader isButtonLoader={true} /> : <GenerateIcon />}
-              {getButtonText()}
-            </button>
-          </div>
-
-          {error && (
-            <div className="mt-8 text-center bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative" role="alert">
-              <strong className="font-bold">Error: </strong>
-              <span className="block sm:inline">{error}</span>
-            </div>
-          )}
-          
-          {post && (
-            <div className="mt-8 animate-fade-in">
-              <QuoteCard {...post} />
-              <ActionButtons {...post} />
-              <div className="text-center mt-6 text-sm text-stone-600">
-                <p>
-                  ✨ To create this kind of Ramayana post with images visit{' '}
-                  <a 
-                    href="https://www.annapoornainfo.com/ramayana" 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className="text-amber-700 hover:underline font-semibold"
-                  >
-                    www.annapoornainfo.com/ramayana
-                  </a>
-                  {' '}now ✨
-                </p>
-              </div>
-            </div>
-          )}
-
-           {!post && !isLoading && !error && (
-            <div className="mt-12 text-center text-stone-500">
-              <p className="text-lg">Set your options and click the button to generate your daily inspiration.</p>
-            </div>
-          )}
-        </main>
-      </div>
-    </div>
-  );
+    return (
+      <Generator
+        key={mode}
+        generationFunctions={generationFunctions}
+        onModeChange={handleGoToIntro}
+        isManagedMode={mode === 'managed'}
+      />
+    );
 };
 
 export default App;
