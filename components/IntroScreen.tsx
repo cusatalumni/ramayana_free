@@ -32,14 +32,20 @@ const IntroScreen: React.FC<IntroScreenProps> = ({ onModeSelect }) => {
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Managed Version */}
           <div className="border border-amber-200 rounded-lg p-6 flex flex-col bg-amber-50/50">
-            <h2 className="text-2xl font-cinzel font-bold text-amber-700">Managed Version</h2>
+            <h2 className="text-2xl font-cinzel font-bold text-amber-700">Premium Version</h2>
             <p className="mt-2 text-stone-600 flex-grow">
               A seamless, ad-free experience. Subscribe via PayPal for unlimited access using our premium API key.
             </p>
             <div className="mt-6">
                 <PayPalButton />
             </div>
+          < Div> Subscription Details:
+Free for 10 days
+Then ‪1.00 USD‬ for one month
+Then ‪5.00 USD‬ for each month
+(Renews until you cancel)
           </div>
+           </div>
 
           {/* Free Version */}
           <div className="border border-stone-300 rounded-lg p-6 flex flex-col">
